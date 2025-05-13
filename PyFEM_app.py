@@ -5,6 +5,7 @@ from matplotlib.colors import Normalize
 import matplotlib.cm as cm
 from math import sqrt
 from PyFEM_core import PrattTruss
+import pandas as pd
 
 # Language dictionaries
 TEXTS = {
@@ -206,9 +207,23 @@ with col2:
 
 # Display detailed results in expandable sections
 with st.expander(text['detailed_displacements']):
-    for i in range(truss.num_nodes):
-        st.write(f"{text['node']} {i}: X={displacements[2*i]*1000:.2f} {text['mm']}, Y={displacements[2*i+1]*1000:.2f} {text['mm']}")
+    # Create displacement data
+    displacement_data = {
+        text['node']: list(range(truss.num_nodes)),
+        'X (mm)': [displacements[2*i]*1000 for i in range(truss.num_nodes)],
+        'Y (mm)': [displacements[2*i+1]*1000 for i in range(truss.num_nodes)]
+    }
+    df_displacements = pd.DataFrame(displacement_data)
+    df_displacements = df_displacements.round(2)  # Round to 2 decimal places
+    st.dataframe(df_displacements, hide_index=True)
 
 with st.expander(text['detailed_forces']):
-    for i in range(truss.num_elements):
-        st.write(f"{text['member']} {i} ({text['nodes']} {truss.elements[i][0]}-{truss.elements[i][1]}): {element_forces[i]/1000:.2f} {text['kn']}")
+    # Create member forces data
+    force_data = {
+        text['member']: list(range(truss.num_elements)),
+        f"{text['nodes']} (i-j)": [f"{truss.elements[i][0]}-{truss.elements[i][1]}" for i in range(truss.num_elements)],
+        f"{text['kn']}": [element_forces[i]/1000 for i in range(truss.num_elements)]
+    }
+    df_forces = pd.DataFrame(force_data)
+    df_forces = df_forces.round(2)  # Round to 2 decimal places
+    st.dataframe(df_forces, hide_index=True)
