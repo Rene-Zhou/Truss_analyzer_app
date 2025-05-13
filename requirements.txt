@@ -2,3 +2,4 @@ streamlit
 numpy
 matplotlib 
 opencv-python
+streamlit_drawable_canvas
