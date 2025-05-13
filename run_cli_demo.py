@@ -1,5 +1,5 @@
 import numpy as np
-from truss_core import PrattTruss  # Import from the refactored core module
+from PyFEM_core import PrattTruss  # Import from the refactored core module
 import matplotlib.pyplot as plt   # For saving the plot
 
 def main():

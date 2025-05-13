@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 import matplotlib.cm as cm
 from math import sqrt
-from truss_core import PrattTruss
+from PyFEM_core import PrattTruss
 
 # Language dictionaries
 TEXTS = {
