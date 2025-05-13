@@ -66,6 +66,55 @@
    - 在侧边栏调整桁架参数、材料属性、荷载和支座条件。
    - 点击运行后，工具会计算并显示分析结果。
 
+## 使用 pm2 保持 Streamlit 服务运行
+
+为了确保 `streamlit` 应用在后台持续运行，可以使用 `pm2` 工具。以下是设置步骤：
+
+1. **安装 pm2**（如果尚未安装）：
+   ```bash
+   npm install -g pm2
+   ```
+
+2. **给予脚本执行权限**：
+   ```bash
+   chmod +x OpenCV_app.sh
+   chmod +x PyFEM_app.sh
+   ```
+
+3. **使用 pm2 启动应用**：
+   运行以下命令来使用 `pm2` 启动你的应用：
+   ```bash
+   pm2 start ./OpenCV_app.sh --name OpenCV_app
+   ```
+
+   对于 `PyFEM_app.py`，可以使用类似的命令：
+   ```bash
+   pm2 start ./PyFEM_app.sh --name PyFEM_app
+   ```
+
+4. **管理 pm2 进程**：
+   - 查看运行的进程：
+     ```bash
+     pm2 list
+     ```
+   - 停止应用：
+     ```bash
+     pm2 stop OpenCV_app
+     pm2 stop PyFEM_app
+     ```
+   - 重启应用：
+     ```bash
+     pm2 restart OpenCV_app
+     pm2 restart PyFEM_app
+     ```
+   - 查看日志：
+     ```bash
+     pm2 logs OpenCV_app
+     pm2 logs PyFEM_app
+     ```
+
+通过以上步骤，你可以使用 `pm2` 保持 `streamlit` 应用在虚拟环境中持续运行。
+
 ## 依赖项
 
 - Python 3.7+
@@ -97,3 +146,28 @@
 - **有限元模块**：
   - 确保输入的参数合理（如荷载大小、材料属性）。
   - 支座条件会影响计算结果，请根据实际需求选择。
+
+### 常见问题
+
+#### 缺少 `libGL.so.1` 共享库
+如果你的 Streamlit 应用在导入 `cv2`（OpenCV）时提示缺少 `libGL.so.1` 共享库，可以按照以下步骤解决：
+
+1. **安装缺失的库**：
+   在 Linux 系统上运行以下命令安装 `libgl1` 包（包含 `libGL.so.1`）：
+   ```bash
+   sudo apt-get update
+   sudo apt-get install libgl1
+   ```
+
+2. **确认安装**：
+   安装完成后，运行以下命令确认 `libGL.so.1` 是否存在：
+   ```bash
+   ls /usr/lib/x86_64-linux-gnu/libGL.so.1
+   ```
+   如果文件存在，说明安装成功。
+
+3. **重启 Streamlit 应用**：
+   重新启动你的 Streamlit 应用：
+   ```bash
+   pm2 restart your-app-name  # 替换为你的应用名称
+   ```
