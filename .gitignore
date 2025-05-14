@@ -32,3 +32,7 @@ build/
 
 # Streamlit cache
 .streamlit/ 
+
+# test data
+test_img/
+test_result/

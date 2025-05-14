@@ -649,3 +649,134 @@ def cluster_endpoints(lines, threshold=6):
     }
     
     return updated_lines 
+
+def normalize_truss_size(lines):
+    """
+    将桁架结构大小(长度)归一化，通过点的重新映射实现
+    
+    Args:
+        lines: 包含 H-truss, V_truss, D_truss 的线段字典
+        
+    Returns:
+        updated_lines: 归一化后的线段字典
+    """
+    # 提取各类线段
+    h_truss_lines = lines.get("H-truss", [])
+    v_truss_lines = lines.get("V_truss", [])
+    d_truss_lines = lines.get("D_truss", [])
+    
+    # 翻转所有线段的y坐标（1000-y）以处理cv2坐标系
+    for line_list in [h_truss_lines, v_truss_lines, d_truss_lines]:
+        for i, line in enumerate(line_list):
+            line_list[i] = [
+                line[0],  # x1
+                1000 - line[1],  # y1
+                line[2],  # x2
+                1000 - line[3]   # y2
+            ]
+    
+    # 1. 将所有端点收集到一个集合中，确保唯一性
+    unique_points = set()
+    
+    for line in h_truss_lines + v_truss_lines + d_truss_lines:
+        unique_points.add((line[0], line[1]))  # 起点
+        unique_points.add((line[2], line[3]))  # 终点
+    
+    # 2. 构建点的字典，给每个点分配名称
+    point_dict = {}
+    for i, point in enumerate(unique_points):
+        point_dict[f"P{i}"] = point
+    
+    # 3. 创建逆向查找映射（从坐标到点名称）
+    point_lookup = {point: name for name, point in point_dict.items()}
+    
+    # 4. 构建线段字典
+    lines_dict = {}
+    
+    # 添加水平桁架线段
+    for i, line in enumerate(h_truss_lines):
+        p1 = (line[0], line[1])
+        p2 = (line[2], line[3])
+        lines_dict[f"H{i}"] = (point_lookup[p1], point_lookup[p2])
+    
+    # 添加垂直桁架线段
+    for i, line in enumerate(v_truss_lines):
+        p1 = (line[0], line[1])
+        p2 = (line[2], line[3])
+        lines_dict[f"V{i}"] = (point_lookup[p1], point_lookup[p2])
+    
+    # 添加斜向桁架线段
+    for i, line in enumerate(d_truss_lines):
+        p1 = (line[0], line[1])
+        p2 = (line[2], line[3])
+        lines_dict[f"D{i}"] = (point_lookup[p1], point_lookup[p2])
+    
+    # 5. 对所有点按x坐标排序，收集所有唯一的x坐标
+    unique_x_coords = sorted(set(p[0] for p in unique_points))
+    x_map = {x: i for i, x in enumerate(unique_x_coords)}
+    
+    # 6. 对于每个x坐标，收集并排序该x上的所有点的y坐标
+    points_by_x = {}
+    for x in unique_x_coords:
+        y_coords = sorted(set(p[1] for p in unique_points if p[0] == x))
+        points_by_x[x] = y_coords
+    
+    # 7. 创建坐标归一化映射
+    normalized_coords = {}
+    for x, y_list in points_by_x.items():
+        x_idx = x_map[x]
+        for y_idx, y in enumerate(y_list):
+            normalized_coords[(x, y)] = (x_idx, y_idx)
+    
+    # 8. 更新点字典中的坐标为归一化后的坐标
+    normalized_point_dict = {}
+    for name, coords in point_dict.items():
+        normalized_point_dict[name] = normalized_coords[coords]
+    
+    # 9. 重建线段
+    new_h_truss = []
+    new_v_truss = []
+    new_d_truss = []
+    
+    # 从线段字典中重建水平桁架
+    for line_name, (p1_name, p2_name) in lines_dict.items():
+        if line_name.startswith('H'):
+            p1_coords = normalized_point_dict[p1_name]
+            p2_coords = normalized_point_dict[p2_name]
+            new_h_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+        elif line_name.startswith('V'):
+            p1_coords = normalized_point_dict[p1_name]
+            p2_coords = normalized_point_dict[p2_name]
+            new_v_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+        elif line_name.startswith('D'):
+            p1_coords = normalized_point_dict[p1_name]
+            p2_coords = normalized_point_dict[p2_name]
+            new_d_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+    
+    # 10. 保持类型信息
+    h_types = []
+    v_types = []
+    d_types = []
+    
+    for line_name, _ in sorted(lines_dict.items()):
+        if line_name.startswith('H'):
+            h_types.append(line_name)
+        elif line_name.startswith('V'):
+            v_types.append(line_name)
+        elif line_name.startswith('D'):
+            d_types.append(line_name)
+    
+    # 11. 构建更新后的线段字典
+    updated_lines = {
+        "H-truss": new_h_truss,
+        "V_truss": new_v_truss,
+        "D_truss": new_d_truss,
+        # 额外信息，可以用于调试或其他用途
+        "point_dict": normalized_point_dict,
+        "lines_dict": lines_dict,
+        "h_types": h_types,
+        "v_types": v_types,
+        "d_types": d_types
+    }
+    
+    return updated_lines 

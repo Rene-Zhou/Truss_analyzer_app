@@ -3,11 +3,9 @@ import cv2
 import numpy as np
 import os
 from datetime import datetime
-import tempfile
 from OpenCV_core import merge_lines, classify_H_truss_members, classify_V_truss_members, cluster_endpoints
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
-
 # 设置页面标题和布局
 st.set_page_config(page_title="桁架分析工具", layout="wide")
 st.title("桁架结构分析工具")
@@ -25,7 +23,7 @@ if drawing_mode == 'point':
     point_display_radius = st.sidebar.slider("点显示半径: ", 1, 25, 3)
 
 # 设置笔画颜色
-stroke_color = st.sidebar.color_picker("笔画颜色: ")
+stroke_color = st.sidebar.color_picker("笔画颜色: ", "#000000")
 
 # 设置背景颜色
 bg_color = st.sidebar.color_picker("背景颜色: ", "#eee")
@@ -43,7 +41,7 @@ canvas_result = st_canvas(
     stroke_width=stroke_width,  # 笔画宽度
     stroke_color=stroke_color,  # 笔画颜色
     background_color=bg_color,  # 背景颜色
-    background_image=bg_image,  # 背景图片
+    background_image=Image.open(bg_image) if bg_image else None,  # 背景图片
     width=1000,  # 画板宽度
     height=1000,  # 画板高度
     drawing_mode=drawing_mode,  # 绘制模式
@@ -60,9 +58,9 @@ if analyze_button and canvas_result.image_data is not None:
     image = cv2.cvtColor(canvas_result.image_data.astype('uint8'), cv2.COLOR_RGBA2BGR)
     
     # 创建输出目录
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join('img', timestamp)
-    os.makedirs(output_dir, exist_ok=True)
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # output_dir = os.path.join('img', timestamp)
+    # os.makedirs(output_dir, exist_ok=True)
 
     # 使用expander来包装处理过程的图片展示
     with st.expander("点击展开查看处理过程", expanded=False):
