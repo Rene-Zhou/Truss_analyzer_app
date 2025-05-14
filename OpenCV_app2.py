@@ -13,6 +13,7 @@ st.set_page_config(page_title="桁架分析工具", layout="wide")
 st.title("桁架结构分析工具")
 
 # 创建画板
+st.subheader("绘制区域")
 canvas_result = st_canvas(
     fill_color="rgba(255, 255, 255, 0)",  # 透明填充色
     stroke_width=2,  # 笔画宽度
@@ -22,9 +23,14 @@ canvas_result = st_canvas(
     height=1000,  # 画板高度
     drawing_mode="freedraw",  # 自由绘制模式
     key="canvas",
+    display_toolbar=True,
+    update_streamlit=True,
 )
 
-if canvas_result.image_data is not None:
+# 添加确认按钮
+analyze_button = st.button("开始分析")
+
+if analyze_button and canvas_result.image_data is not None:
     # 将canvas的图像数据转换为OpenCV格式
     image = cv2.cvtColor(canvas_result.image_data.astype('uint8'), cv2.COLOR_RGBA2BGR)
     
