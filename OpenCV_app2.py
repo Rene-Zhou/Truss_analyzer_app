@@ -2,8 +2,9 @@ import streamlit as st
 import cv2
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 from datetime import datetime
-from OpenCV_core import merge_lines, classify_H_truss_members, classify_V_truss_members, cluster_endpoints
+from OpenCV_core import merge_lines, classify_H_truss_members, classify_V_truss_members, cluster_endpoints, normalize_truss_size
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
 # 设置页面标题和布局
@@ -163,6 +164,9 @@ if analyze_button and canvas_result.image_data is not None:
             v_clustered_lines = clustered_truss_result["V_truss"]
             d_clustered_lines = clustered_truss_result["D_truss"]
 
+            # 桁架归一化处理
+            normalized_truss = normalize_truss_size(clustered_truss_result)
+
             # 创建端点聚类后的图像
             clustered_truss_image = np.zeros_like(image)
             # 绘制水平桁架（红色）
@@ -199,7 +203,98 @@ if analyze_button and canvas_result.image_data is not None:
 
     # 显示最终结果（大图）
     st.subheader("最终分析结果")
-    st.image(clustered_truss_image, caption="最终分析结果（包含端点标记）", use_container_width=True)
+    
+    # 创建结果可视化区域
+    cols_final = st.columns(2)
+    
+    with cols_final[0]:
+        # 使用matplotlib绘制原始桁架结果，参考test_normalize.py的方式
+        fig1, ax1 = plt.subplots(figsize=(10, 10))
+        
+        # 构建与normalized_truss相同格式的字典，便于统一绘图
+        original_truss_dict = {
+            "H-truss": h_clustered_lines,
+            "V_truss": v_clustered_lines,
+            "D_truss": d_clustered_lines
+        }
+        
+        # 绘制水平桁架构件 (红色)
+        for line in original_truss_dict.get("H-truss", []):
+            ax1.plot([line[0], line[2]], [line[1], line[3]], 'r-', linewidth=2, label='H-truss')
+        
+        # 绘制垂直桁架构件 (绿色)
+        for line in original_truss_dict.get("V_truss", []):
+            ax1.plot([line[0], line[2]], [line[1], line[3]], 'g-', linewidth=2, label='V-truss')
+        
+        # 绘制斜向桁架构件 (蓝色)
+        for line in original_truss_dict.get("D_truss", []):
+            ax1.plot([line[0], line[2]], [line[1], line[3]], 'b-', linewidth=2, label='D-truss')
+        
+        # 收集所有节点坐标
+        all_points = []
+        for line in original_truss_dict.get("H-truss", []) + original_truss_dict.get("V_truss", []) + original_truss_dict.get("D_truss", []):
+            all_points.append((line[0], line[1]))
+            all_points.append((line[2], line[3]))
+        
+        # 绘制节点 - 先绘制黑色轮廓增加可见性
+        for point in all_points:
+            ax1.plot(point[0], point[1], 'ko', markersize=8, zorder=10)  # 黑色轮廓
+        
+        # 再绘制白色内部
+        for i, point in enumerate(all_points):
+            # 只在第一个点添加标签，避免图例重复
+            if i == 0:
+                ax1.plot(point[0], point[1], 'wo', markersize=6, zorder=11, label='Nodes')  # 白色内部带标签
+            else:
+                ax1.plot(point[0], point[1], 'wo', markersize=6, zorder=11)  # 白色内部不带标签
+            
+        # 设置图表格式
+        ax1.set_title("Original Truss Analysis")
+        ax1.axis('equal')
+        ax1.grid(True)
+        
+        # 去除重复的图例条目
+        handles, labels = ax1.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax1.legend(by_label.values(), by_label.keys(), loc='best')
+        
+        # 显示图表
+        st.pyplot(fig1)
+    
+    with cols_final[1]:
+        # 使用matplotlib绘制归一化的桁架
+        fig2, ax2 = plt.subplots(figsize=(10, 10))
+        
+        # 绘制水平桁架构件 (红色)
+        for line in normalized_truss.get("H-truss", []):
+            ax2.plot([line[0], line[2]], [line[1], line[3]], 'r-', linewidth=2, label='H-truss')
+        
+        # 绘制垂直桁架构件 (绿色)
+        for line in normalized_truss.get("V_truss", []):
+            ax2.plot([line[0], line[2]], [line[1], line[3]], 'g-', linewidth=2, label='V-truss')
+        
+        # 绘制斜向桁架构件 (蓝色)
+        for line in normalized_truss.get("D_truss", []):
+            ax2.plot([line[0], line[2]], [line[1], line[3]], 'b-', linewidth=2, label='D-truss')
+        
+        # 设置图表格式
+        ax2.set_title("Normalized Truss Structure")
+        ax2.axis('equal')
+        ax2.grid(True)
+        
+        # 去除重复的图例条目
+        handles, labels = ax2.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax2.legend(by_label.values(), by_label.keys(), loc='best')
+        
+        # 显示图表
+        st.pyplot(fig2)
+        
+        # 显示归一化桁架数据统计
+        st.subheader("归一化桁架数据")
+        st.metric("水平桁架数量", len(normalized_truss.get("H-truss", [])))
+        st.metric("垂直桁架数量", len(normalized_truss.get("V_truss", [])))
+        st.metric("斜撑数量", len(normalized_truss.get("D_truss", [])))
 
 else:
     st.error("未能检测到任何线段，请尝试调整图片或参数。")

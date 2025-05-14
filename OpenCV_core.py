@@ -659,12 +659,16 @@ def normalize_truss_size(lines):
         
     Returns:
         updated_lines: 归一化后的线段字典
+        
+    注意:
+        x坐标: 按从小到大排序后映射到0,1,2,3...的整数序列
+        y坐标: 保持二值映射(0表示下边界, 1表示上边界)
     """
     # 提取各类线段
     h_truss_lines = lines.get("H-truss", [])
     v_truss_lines = lines.get("V_truss", [])
     d_truss_lines = lines.get("D_truss", [])
-    
+     
     # 翻转所有线段的y坐标（1000-y）以处理cv2坐标系
     for line_list in [h_truss_lines, v_truss_lines, d_truss_lines]:
         for i, line in enumerate(line_list):
@@ -711,49 +715,102 @@ def normalize_truss_size(lines):
         p2 = (line[2], line[3])
         lines_dict[f"D{i}"] = (point_lookup[p1], point_lookup[p2])
     
-    # 5. 对所有点按x坐标排序，收集所有唯一的x坐标
-    unique_x_coords = sorted(set(p[0] for p in unique_points))
+    # 5. X坐标归一化: 对所有点按x坐标排序，将它们映射到0,1,2,3...
+    # 首先收集所有不同的 x 坐标
+    all_x_coords = sorted(set(p[0] for p in unique_points))
+    
+    # 合并相近的 x 坐标 (差值小于10的视为同一点)
+    merged_x_coords = []
+    if all_x_coords:
+        current_group = [all_x_coords[0]]
+        
+        for i in range(1, len(all_x_coords)):
+            # 如果当前x与上一组最后一个x的差值小于10，则归入同一组
+            if all_x_coords[i] - current_group[-1] < 10:
+                current_group.append(all_x_coords[i])
+            else:
+                # 将当前组的平均值添加到结果中
+                merged_x_coords.append(sum(current_group) / len(current_group))
+                # 开始新的一组
+                current_group = [all_x_coords[i]]
+        
+        # 添加最后一组的平均值
+        merged_x_coords.append(sum(current_group) / len(current_group))
+    
+    # 为原始x坐标创建到合并后坐标的映射
+    x_merge_map = {}
+    for orig_x in all_x_coords:
+        # 找到最接近的合并后坐标
+        closest_merged_x = min(merged_x_coords, key=lambda merged_x: abs(merged_x - orig_x))
+        x_merge_map[orig_x] = closest_merged_x
+    
+    # 创建从合并后的x坐标到索引的映射
+    unique_x_coords = merged_x_coords
     x_map = {x: i for i, x in enumerate(unique_x_coords)}
     
-    # 6. 对于每个x坐标，收集并排序该x上的所有点的y坐标
-    points_by_x = {}
-    for x in unique_x_coords:
-        y_coords = sorted(set(p[1] for p in unique_points if p[0] == x))
-        points_by_x[x] = y_coords
+    # 6. Y坐标归一化: 收集所有唯一的y坐标
+    unique_y_coords = sorted(set(p[1] for p in unique_points))
     
-    # 7. 创建坐标归一化映射
+    # 获取水平桁架的y坐标，用于确定上下边界
+    h_truss_y_coords = []
+    for line in h_truss_lines:
+        h_truss_y_coords.append(line[1])  # y1
+        h_truss_y_coords.append(line[3])  # y2
+    
+    # 7. 创建Y坐标的二值映射
+    binary_y_map = {}
+    if h_truss_y_coords:
+        # 找出水平桁架的最小和最大y坐标作为下边界和上边界
+        min_h_y = min(h_truss_y_coords)
+        max_h_y = max(h_truss_y_coords)
+        
+        # 创建二值映射：0表示下边界，1表示上边界
+        for y in unique_y_coords:
+            # 计算与上下边界的距离
+            dist_to_min = abs(y - min_h_y)
+            dist_to_max = abs(y - max_h_y)
+            
+            # 将y坐标映射到最近的边界
+            if dist_to_min <= dist_to_max:
+                binary_y_map[y] = 0  # 下边界
+            else:
+                binary_y_map[y] = 1  # 上边界
+    else:
+        # 如果没有水平桁架，则使用最小/最大y坐标
+        binary_y_map = {y: (1 if i > 0 else 0) for i, y in enumerate(unique_y_coords)}
+    
+    # 8. 创建坐标归一化映射
     normalized_coords = {}
-    for x, y_list in points_by_x.items():
-        x_idx = x_map[x]
-        for y_idx, y in enumerate(y_list):
-            normalized_coords[(x, y)] = (x_idx, y_idx)
+    for point in unique_points:
+        x, y = point
+        # 使用合并后的x坐标值
+        merged_x = x_merge_map[x]
+        normalized_coords[point] = (x_map[merged_x], binary_y_map[y])
     
-    # 8. 更新点字典中的坐标为归一化后的坐标
+    # 9. 更新点字典中的坐标为归一化后的坐标
     normalized_point_dict = {}
     for name, coords in point_dict.items():
         normalized_point_dict[name] = normalized_coords[coords]
     
-    # 9. 重建线段
+    # 10. 重建线段
     new_h_truss = []
     new_v_truss = []
     new_d_truss = []
     
-    # 从线段字典中重建水平桁架
+    # 从线段字典中重建各类桁架
     for line_name, (p1_name, p2_name) in lines_dict.items():
+        p1_coords = normalized_point_dict[p1_name]
+        p2_coords = normalized_point_dict[p2_name]
+        new_line = [p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]]
+        
         if line_name.startswith('H'):
-            p1_coords = normalized_point_dict[p1_name]
-            p2_coords = normalized_point_dict[p2_name]
-            new_h_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+            new_h_truss.append(new_line)
         elif line_name.startswith('V'):
-            p1_coords = normalized_point_dict[p1_name]
-            p2_coords = normalized_point_dict[p2_name]
-            new_v_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+            new_v_truss.append(new_line)
         elif line_name.startswith('D'):
-            p1_coords = normalized_point_dict[p1_name]
-            p2_coords = normalized_point_dict[p2_name]
-            new_d_truss.append([p1_coords[0], p1_coords[1], p2_coords[0], p2_coords[1]])
+            new_d_truss.append(new_line)
     
-    # 10. 保持类型信息
+    # 11. 保持类型信息
     h_types = []
     v_types = []
     d_types = []
@@ -766,7 +823,7 @@ def normalize_truss_size(lines):
         elif line_name.startswith('D'):
             d_types.append(line_name)
     
-    # 11. 构建更新后的线段字典
+    # 12. 构建更新后的线段字典
     updated_lines = {
         "H-truss": new_h_truss,
         "V_truss": new_v_truss,
@@ -776,7 +833,9 @@ def normalize_truss_size(lines):
         "lines_dict": lines_dict,
         "h_types": h_types,
         "v_types": v_types,
-        "d_types": d_types
+        "d_types": d_types,
+        "x_map": x_map,  # 添加x坐标映射，方便调试
+        "y_map": binary_y_map  # 添加y坐标映射，方便调试
     }
     
-    return updated_lines 
+    return updated_lines
