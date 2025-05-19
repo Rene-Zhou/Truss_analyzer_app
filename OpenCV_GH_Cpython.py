@@ -1,43 +1,80 @@
+# 这个脚本是供Grasshopper调用的，用于分析truss的图像
+
 import cv2
 import numpy as np
-import os
-from datetime import datetime
-import tempfile
 
-# 从OpenCV_B_0423_1.py复制的函数
+# Read the hand-drawn sketch
+input_image_path = 'D:/Rene/OpenCV/img/test4.jpg'
+# output_image_path = os.path.join(output_dir, 'output_opencv_0415_1.png') # Removed image output path
+image = cv2.imread(input_image_path)
+
+# Convert to grayscale
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+# cv2.imwrite(os.path.join(output_dir, 'step1_gray.png'), gray) # Removed image output
+
+# Use Gaussian blur to reduce noise
+blurred = cv2.GaussianBlur(gray, (15, 15), 0)
+# cv2.imwrite(os.path.join(output_dir, 'step2_blurred.png'), blurred) # Removed image output
+
+# Adaptive thresholding to improve edge detection quality
+thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+# cv2.imwrite(os.path.join(output_dir, 'step3_thresh.png'), thresh) # Removed image output
+
+# Invert the binary image
+edges = cv2.bitwise_not(thresh)
+# cv2.imwrite(os.path.join(output_dir, 'step4_bitwise_not.png'), edges) # Removed image output (was already commented)
+
+# Add erosion operation to thin lines
+kernel = np.ones((3,3), np.uint8)
+eroded_edges = cv2.erode(edges, kernel, iterations=1)
+# cv2.imwrite(os.path.join(output_dir, 'step4_eroded.png'), eroded_edges) # Removed image output
+
+# Use Hough Transform to detect line segments, adjust parameters for accuracy
+lines = cv2.HoughLinesP(eroded_edges, 1, np.pi/180, threshold=40, minLineLength=40, maxLineGap=30)
+
+# Define line segment merging function
 def merge_lines(lines, angle_threshold=10, parallel_distance_threshold=30):
     """
-    线段合并函数，可以处理重叠/部分重叠的线段，即斜率相近、线段间最近距离接近、线段端点相差较远的线段。
+    Line segment merging function, can handle overlapping/partially overlapping segments,
+    i.e., segments with similar slopes, close minimum distance, and endpoints far apart.
+
+    Input parameters:
+    lines: A list containing multiple lines, each represented by two coordinate points [x1,y1,x2,y2].
+    angle_threshold: Angle threshold for similar line slopes (in degrees), default is 10.
+    parallel_distance_threshold: Maximum perpendicular distance threshold between parallel line segments, default is 30.
+
+    Returns:
+    A list containing the merged lines.
     """
     if lines is None or len(lines) == 0:
         return []
-    
-    # 提取所有线段
+
+    # Extract all line segments
     lines_array = lines
     merged_lines = []
     used_lines = [False] * len(lines_array)
-    
-    # 计算线段角度
+
+    # Calculate line segment angle
     def get_angle(line):
         x1, y1, x2, y2 = line
-        # 避免除零错误
+        # Avoid division by zero error
         if x2 - x1 == 0:
             return 90.0
         return np.degrees(np.arctan((y2 - y1) / (x2 - x1)))
-    
-    # 计算两个线段之间的距离（点到线段的最小距离）
+
+    # Calculate the distance between two line segments (minimum distance from point to line segment)
     def line_distance(line1, line2):
         x1, y1, x2, y2 = line1
         x3, y3, x4, y4 = line2
-        
-        # 线段1的方向向量
+
+        # Direction vector of line segment 1
         v1 = np.array([x2 - x1, y2 - y1])
-        # 线段1的单位向量
+        # Unit vector of line segment 1
         len_v1 = np.sqrt(v1[0]**2 + v1[1]**2)
         if len_v1 == 0:
             return float('inf')
         unit_v1 = v1 / len_v1
-        
+
         # Pad vectors to 3D for np.cross
         unit_v1_3d = np.array([unit_v1[0], unit_v1[1], 0])
         p3_vec_3d = np.array([x3 - x1, y3 - y1, 0])
@@ -46,156 +83,170 @@ def merge_lines(lines, angle_threshold=10, parallel_distance_threshold=30):
         # Calculate the magnitude of the cross product (z-component)
         p1_to_line = np.abs(np.cross(unit_v1_3d, p3_vec_3d)[2])
         p2_to_line = np.abs(np.cross(unit_v1_3d, p4_vec_3d)[2])
-        
+
         return min(p1_to_line, p2_to_line)
-    
-    # 判断两个线段是否可以合并
+
+    # Determine if two line segments can be merged
     def can_merge(line1, line2):
-        # 检查角度差异
+        # Check angle difference
         angle1 = get_angle(line1)
         angle2 = get_angle(line2)
         angle_diff = min(abs(angle1 - angle2), 180 - abs(angle1 - angle2))
         if angle_diff > angle_threshold:
             return False
-        
-        # 检查平行距离
+
+        # Check parallel distance
         distance = line_distance(line1, line2)
         if distance > parallel_distance_threshold:
             return False
-        
+
         return True
-    
-    # 合并两个线段
+
+    # Merge two line segments
     def merge_two_lines(line1, line2):
         x1, y1, x2, y2 = line1
         x3, y3, x4, y4 = line2
-        
-        # 将所有点按照x坐标排序（如果接近垂直则按y坐标排序）
+
+        # Sort all points by x-coordinate (or y-coordinate if close to vertical)
         angle = get_angle(line1)
         if abs(angle) > 45:
-            # 垂直线，按y坐标排序
+            # Vertical line, sort by y-coordinate
             points = sorted([(x1, y1), (x2, y2), (x3, y3), (x4, y4)], key=lambda p: p[1])
         else:
-            # 水平线，按x坐标排序
+            # Horizontal line, sort by x-coordinate
             points = sorted([(x1, y1), (x2, y2), (x3, y3), (x4, y4)], key=lambda p: p[0])
-        
-        # 取最远的两个点作为新线段的端点
+
+        # Take the two farthest points as the endpoints of the new line segment
         return [points[0][0], points[0][1], points[3][0], points[3][1]]
-    
-    # 合并过程
+
+    # Merging process
     for i in range(len(lines_array)):
         if used_lines[i]:
             continue
-            
+
         current_line = lines_array[i]
         used_lines[i] = True
-        
-        # 尝试合并其他线段
+
+        # Try to merge other line segments
         while True:
             merged = False
             for j in range(len(lines_array)):
                 if used_lines[j] or i == j:
                     continue
-                    
+
                 if can_merge(current_line, lines_array[j]):
                     current_line = merge_two_lines(current_line, lines_array[j])
                     used_lines[j] = True
                     merged = True
-                    
+
             if not merged:
                 break
-                
+
         merged_lines.append(current_line)
-        
+
     return merged_lines
 
+# Identify horizontal truss members
 def classify_H_truss_members(lines, threshold=20, angle_threshold=5):
     """
-    判别水平桁架
+    Identify horizontal truss members
+    Iterate through the input line segments. For each segment, calculate how many endpoints
+    from other segments are within a perpendicular distance less than the threshold.
+    Finally, select the two segments with the most adjacent endpoints as horizontal trusses.
+
+    Input parameters:
+    lines: List of line segments
+    threshold: Distance threshold for adjacent endpoints
+    angle_threshold: Maximum allowed angle between two horizontal trusses
+
+    Returns:
+    A dictionary containing "H-truss" and "Other" keys, representing horizontal trusses
+    and other segments respectively.
     """
     if not lines or len(lines) < 3:
         return {"H-truss": [], "Other": lines.copy() if lines else []}
-    
-    # 计算线段到点的垂直距离
+
+    # Calculate the perpendicular distance from a point to a line segment
     def perpendicular_distance(line, point):
         x1, y1, x2, y2 = line
         x0, y0 = point
-        
-        # 如果线段长度接近零，直接返回点到端点的欧氏距离
+
+        # If the segment length is close to zero, return the Euclidean distance from the point to the endpoint
         if abs(x2-x1) < 1e-8 and abs(y2-y1) < 1e-8:
             return np.sqrt((x0-x1)**2 + (y0-y1)**2)
-        
-        # 计算线段长度
+
+        # Calculate segment length
         length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-        
-        # 计算叉积得到面积，除以长度得到高度（垂直距离）
+
+        # Calculate the area using the cross product, divide by length to get height (perpendicular distance)
         area = abs((x2-x1)*(y1-y0) - (x1-x0)*(y2-y1))
         return area / length
-    
-    # 统计每条线段相邻的端点数量
+
+    # Count the number of adjacent endpoints for each line segment
     adjacent_counts = []
     for i, line in enumerate(lines):
         count = 0
         for j, other_line in enumerate(lines):
             if i == j:
                 continue
-                
-            # 获取另一条线段的端点
+
+            # Get the endpoints of the other line segment
             endpoints = [(other_line[0], other_line[1]), (other_line[2], other_line[3])]
-            
-            # 检查端点是否在当前线段附近
+
+            # Check if the endpoint is near the current line segment
             for point in endpoints:
                 dist = perpendicular_distance(line, point)
                 if dist < threshold:
                     count += 1
-        
+
         adjacent_counts.append((i, count, line))
-    
-    # 按相邻端点数量降序排序
+
+    # Sort in descending order by the number of adjacent endpoints
     adjacent_counts.sort(key=lambda x: x[1], reverse=True)
-    
-    # 检查排名前两的线段是否近似平行
+
+    # Check if the top two segments are approximately parallel
     if len(adjacent_counts) >= 2:
         line1 = adjacent_counts[0][2]
         line2 = adjacent_counts[1][2]
-        
-        # 计算线段的方向向量
+
+        # Calculate the direction vector of the line segment
         vec1 = [line1[2] - line1[0], line1[3] - line1[1]]
         vec2 = [line2[2] - line2[0], line2[3] - line2[1]]
-        
-        # 计算向量的长度
+
+        # Calculate the length of the vector
         len1 = np.sqrt(vec1[0]**2 + vec1[1]**2)
         len2 = np.sqrt(vec2[0]**2 + vec2[1]**2)
-        
-        # 归一化向量
+
+        # Normalize the vector
         if len1 > 0 and len2 > 0:
             vec1 = [vec1[0]/len1, vec1[1]/len1]
             vec2 = [vec2[0]/len2, vec2[1]/len2]
-            
-            # 计算点积，判断是否平行（正或反方向）
+
+            # Calculate the dot product to determine if parallel (same or opposite direction)
             dot_product = abs(vec1[0]*vec2[0] + vec1[1]*vec2[1])
-            
-            # 计算两线段间的夹角（角度）
+
+            # Calculate the angle between the two line segments (degrees)
             angle = np.degrees(np.arccos(np.clip(dot_product, -1.0, 1.0)))
-            
-            # 如果接近平行（点积接近1），则检查夹角是否在阈值内
-            if dot_product > 0.9:  # 余弦值接近1表示角度接近0或180度
+
+            # If approximately parallel (dot product close to 1), check if the angle is within the threshold
+            if dot_product > 0.9:  # Cosine value close to 1 indicates the angle is close to 0 or 180 degrees
                 if angle <= angle_threshold:
-                    # 计算两条线的斜率
+                    # Calculate the slopes of the two lines
                     x1, y1, x2, y2 = line1
                     x3, y3, x4, y4 = line2
-                    
-                    # 计算两条线的斜率
+
+                    # Calculate the slopes of the two lines
                     slope1 = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 1e-8 else float('inf')
                     slope2 = (y4 - y3) / (x4 - x3) if abs(x4 - x3) > 1e-8 else float('inf')
-                    
-                    # 判断两条线段是否都接近水平（斜率接近0）
-                    slope_threshold = 0.1  # 定义斜率接近0的阈值
+
+                    # Determine if both line segments are nearly horizontal (slope close to 0)
+                    slope_threshold = 0.1  # Define the threshold for slope close to 0
                     if abs(slope1) < slope_threshold and abs(slope2) < slope_threshold:
-                        # 将斜率统一调整为0（完全水平）
+                        # Adjust the slope uniformly to 0 (completely horizontal)
                         avg_slope = 0
+                        print("Detected parallel and nearly horizontal segments, adjusting slope to 0")
                     else:
-                        # 处理垂直线的情况
+                        # Handle the case of vertical lines
                         if slope1 == float('inf') and slope2 == float('inf'):
                             avg_slope = float('inf')
                         elif slope1 == float('inf'):
@@ -204,210 +255,241 @@ def classify_H_truss_members(lines, threshold=20, angle_threshold=5):
                             avg_slope = slope1
                         else:
                             avg_slope = (slope1 + slope2) / 2
-                    
-                    # 调整线段，保持中点不变
-                    # 线段1的中点
+
+                    # Adjust the line segment, keeping the midpoint unchanged
+                    # Midpoint of segment 1
                     mid_x1 = (x1 + x2) / 2
                     mid_y1 = (y1 + y2) / 2
-                    # 线段2的中点
+                    # Midpoint of segment 2
                     mid_x2 = (x3 + x4) / 2
                     mid_y2 = (y3 + y4) / 2
-                    
-                    # 线段长度
+
+                    # Segment length
                     length1 = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
                     length2 = np.sqrt((x4 - x3)**2 + (y4 - y3)**2)
-                    
-                    # 调整线段1的端点
+
+                    # Adjust endpoints of segment 1
                     if avg_slope == float('inf'):
-                        # 垂直线
+                        # Vertical line
                         x1_new = mid_x1
                         y1_new = mid_y1 - length1/2
                         x2_new = mid_x1
                         y2_new = mid_y1 + length1/2
                     else:
-                        # 计算线段1新端点的x偏移量
+                        # Calculate the x-offset for the new endpoints of segment 1
                         dx1 = length1 / (2 * np.sqrt(1 + avg_slope**2))
                         x1_new = mid_x1 - dx1
                         y1_new = mid_y1 - avg_slope * dx1
                         x2_new = mid_x1 + dx1
                         y2_new = mid_y1 + avg_slope * dx1
-                    
-                    # 调整线段2的端点
+
+                    # Adjust endpoints of segment 2
                     if avg_slope == float('inf'):
-                        # 垂直线
+                        # Vertical line
                         x3_new = mid_x2
                         y3_new = mid_y2 - length2/2
                         x4_new = mid_x2
                         y4_new = mid_y2 + length2/2
                     else:
-                        # 计算线段2新端点的x偏移量
+                        # Calculate the x-offset for the new endpoints of segment 2
                         dx2 = length2 / (2 * np.sqrt(1 + avg_slope**2))
                         x3_new = mid_x2 - dx2
                         y3_new = mid_y2 - avg_slope * dx2
                         x4_new = mid_x2 + dx2
                         y4_new = mid_y2 + avg_slope * dx2
-                    
-                    # 更新线段
+
+                    # Update line segments
                     line1 = [x1_new, y1_new, x2_new, y2_new]
                     line2 = [x3_new, y3_new, x4_new, y4_new]
-                    
-                    # 构建其他线段列表
+
+                    # Build the list of other line segments
                     h_truss_indices = {adjacent_counts[0][0], adjacent_counts[1][0]}
                     other_lines = [lines[i] for i in range(len(lines)) if i not in h_truss_indices]
-                    
+
                     return {"H-truss": [line1, line2], "Other": other_lines}
-    
-    # 如果没有找到合适的平行线段，返回端点最多的两条线段
+                else:
+                    print(f"Error: Detected horizontal truss angle is {angle:.2f} degrees, exceeding threshold {angle_threshold} degrees.")
+                    # Build the list of other line segments
+                    h_truss_indices = {adjacent_counts[0][0], adjacent_counts[1][0]}
+                    other_lines = [lines[i] for i in range(len(lines)) if i not in h_truss_indices]
+
+                    return {"H-truss": [line1, line2], "Other": other_lines}
+
+    # If no suitable parallel segments are found, return the two segments with the most endpoints
     if len(adjacent_counts) >= 2:
         line1 = adjacent_counts[0][2]
         line2 = adjacent_counts[1][2]
-        
-        # 构建其他线段列表
+
+        # Build the list of other line segments
         h_truss_indices = {adjacent_counts[0][0], adjacent_counts[1][0]}
         other_lines = [lines[i] for i in range(len(lines)) if i not in h_truss_indices]
-        
+
         return {"H-truss": [line1, line2], "Other": other_lines}
     elif len(adjacent_counts) == 1:
         line1 = adjacent_counts[0][2]
-        
-        # 构建其他线段列表
+
+        # Build the list of other line segments
         h_truss_indices = {adjacent_counts[0][0]}
         other_lines = [lines[i] for i in range(len(lines)) if i not in h_truss_indices]
-        
+
         return {"H-truss": [line1], "Other": other_lines}
     else:
         return {"H-truss": [], "Other": []}
 
 def classify_V_truss_members(lines, angle_threshold=20):
     """
-    判别垂直桁架和斜撑
+    Identify vertical truss members and diagonal braces
+    Iterate through the segments in 'lines'. If the angle between a segment and the H_truss_lines
+    is less than angle_threshold, it's considered a vertical truss; otherwise, it's a diagonal brace.
+
+    Input parameters:
+    lines: List of line segments, including H-truss and Other
+    angle_threshold: Angle threshold
+
+    Returns:
+    A dictionary with "H-truss", "V_truss", and "D_truss" keys, representing horizontal trusses,
+    vertical trusses, and diagonal braces respectively.
     """
     h_truss_lines = lines.get("H-truss", [])
     other_lines = lines.get("Other", [])
-    
+
     v_truss_lines = []
     d_truss_lines = []
-    
-    # 如果没有水平桁架，则无法判断垂直桁架
+
+    # If there are no horizontal trusses, vertical trusses cannot be determined
     if not h_truss_lines:
         return {"H-truss": h_truss_lines, "V_truss": [], "D_truss": other_lines}
-    
-    # 计算水平桁架的平均角度
+
+    # Calculate the average angle of the horizontal trusses
     h_angles = []
     for line in h_truss_lines:
         x1, y1, x2, y2 = line
-        # 避免除零错误
+        # Avoid division by zero error
         if x2 - x1 == 0:
             angle = 90.0
         else:
             angle = np.degrees(np.arctan((y2 - y1) / (x2 - x1)))
         h_angles.append(angle)
-    
+
     h_avg_angle = sum(h_angles) / len(h_angles) if h_angles else 0
-    
-    # 遍历其他线段，判断是垂直桁架还是斜撑
+
+    # Iterate through other segments to determine if they are vertical trusses or diagonal braces
     for line in other_lines:
         x1, y1, x2, y2 = line
-        # 避免除零错误
+        # Avoid division by zero error
         if x2 - x1 == 0:
             angle = 90.0
         else:
             angle = np.degrees(np.arctan((y2 - y1) / (x2 - x1)))
-        
-        # 计算与水平桁架的夹角差
-        # 垂直桁架应该与水平桁架成90度角
+
+        # Calculate the angle difference with the horizontal trusses
+        # Vertical trusses should be at a 90-degree angle to horizontal trusses
         angle_diff = abs(abs(angle - h_avg_angle) - 90)
-        
-        # 如果夹角接近90度（在阈值范围内），则认为是垂直桁架
+
+        # If the angle is close to 90 degrees (within the threshold), it's considered a vertical truss
         if angle_diff < angle_threshold:
             v_truss_lines.append(line)
         else:
             d_truss_lines.append(line)
-    
+
     return {
         "H-truss": h_truss_lines,
         "V_truss": v_truss_lines,
         "D_truss": d_truss_lines
     }
 
+# Add endpoint clustering and intersection alignment function
 def cluster_endpoints(lines, threshold=6):
     """
-    对线段端点进行聚类，并找出线段交点，使线段更加对齐。
+    Cluster line segment endpoints and find intersection points to align segments better.
+    Specific rules are as follows:
+        1. First, merge the endpoints of vertical and diagonal truss members.
+        2. Both endpoints of vertical and diagonal truss members should lie on the two horizontal truss lines respectively.
+        3. Each endpoint of the horizontal truss members should coincide with at least one endpoint of a vertical/diagonal truss member.
+
+    Parameters:
+    lines: A dictionary with "H-truss", "V_truss", and "D_truss" keys, representing horizontal trusses,
+           vertical trusses, and diagonal braces respectively.
+    threshold: Distance threshold for endpoint clustering
+
+    Returns:
+    Updated dictionary of line segments
     """
-    # 提取各类线段
+    # Extract various types of line segments
     h_truss_lines = lines.get("H-truss", [])
     v_truss_lines = lines.get("V_truss", [])
     d_truss_lines = lines.get("D_truss", [])
-    
+
     if not h_truss_lines:
-        return lines  # 如果没有水平桁架，则无法进行对齐
-    
-    # 计算点到线段的最短距离及最近点
+        return lines  # If there are no horizontal trusses, alignment cannot be performed
+
+    # Calculate the shortest distance from a point to a line segment and the closest point
     def point_to_line_distance(point, line):
         x0, y0 = point
         x1, y1, x2, y2 = line
-        
-        # 如果线段长度为0，则直接返回到端点的距离
+
+        # If the segment length is 0, return the distance to the endpoint directly
         if abs(x2-x1) < 1e-8 and abs(y2-y1) < 1e-8:
             return np.sqrt((x0-x1)**2 + (y0-y1)**2), (x1, y1)
-        
-        # 线段的方向向量
+
+        # Direction vector of the line segment
         dx, dy = x2-x1, y2-y1
-        # 线段长度的平方
+        # Square of the segment length
         length_squared = dx**2 + dy**2
-        
-        # 计算投影比例 t
+
+        # Calculate the projection ratio t
+        # Ensure t is within [0, 1] to stay within the segment
         t = max(0, min(1, ((x0-x1)*dx + (y0-y1)*dy) / length_squared))
-        
-        # 计算线段上的最近点
+
+        # Calculate the closest point on the line segment
         closest_x = x1 + t * dx
         closest_y = y1 + t * dy
-        
-        # 计算距离
+
+        # Calculate the distance
         distance = np.sqrt((x0-closest_x)**2 + (y0-closest_y)**2)
-        
+
         return distance, (closest_x, closest_y)
-    
-    # 收集垂直和斜向桁架的端点
+
+    # Collect endpoints of vertical and diagonal trusses
     vd_endpoints = []
     for i, line in enumerate(v_truss_lines):
-        vd_endpoints.append(("V", i, 0, (line[0], line[1])))  # 起点
-        vd_endpoints.append(("V", i, 1, (line[2], line[3])))  # 终点
-        
+        vd_endpoints.append(("V", i, 0, (line[0], line[1])))  # Start point
+        vd_endpoints.append(("V", i, 1, (line[2], line[3])))  # End point
+
     for i, line in enumerate(d_truss_lines):
-        vd_endpoints.append(("D", i, 0, (line[0], line[1])))  # 起点
-        vd_endpoints.append(("D", i, 1, (line[2], line[3])))  # 终点
-    
-    # 步骤1：对垂直和斜向桁架的端点进行合并聚类
+        vd_endpoints.append(("D", i, 0, (line[0], line[1])))  # Start point
+        vd_endpoints.append(("D", i, 1, (line[2], line[3])))  # End point
+
+    # Step 1: Merge and cluster endpoints of vertical and diagonal trusses
     clusters = []
     processed = set()
-    
+
     for i, (type1, idx1, end1, point1) in enumerate(vd_endpoints):
         if i in processed:
             continue
-            
+
         cluster = [(type1, idx1, end1, point1)]
         processed.add(i)
-        
+
         for j, (type2, idx2, end2, point2) in enumerate(vd_endpoints):
             if j in processed or i == j:
                 continue
-                
+
             distance = np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
-            if distance < threshold * 0.5:  # 使用较小的阈值进行端点合并
+            if distance < threshold * 0.5:  # Use a smaller threshold for endpoint merging
                 cluster.append((type2, idx2, end2, point2))
                 processed.add(j)
-        
-        if len(cluster) > 1:  # 只关注有多个点的聚类
+
+        if len(cluster) > 1:  # Only focus on clusters with multiple points
             clusters.append(cluster)
-    
-    # 合并端点聚类
+
+    # Merge endpoint clusters
     for cluster in clusters:
-        # 计算平均位置
+        # Calculate the average position
         avg_x = sum(p[3][0] for p in cluster) / len(cluster)
         avg_y = sum(p[3][1] for p in cluster) / len(cluster)
-        
-        # 更新每个点所属线段的端点
+
+        # Update the endpoints of the line segment each point belongs to
         for truss_type, line_idx, point_idx, _ in cluster:
             if truss_type == "V":
                 if point_idx == 0:
@@ -423,56 +505,59 @@ def cluster_endpoints(lines, threshold=6):
                 else:
                     d_truss_lines[line_idx][2] = avg_x
                     d_truss_lines[line_idx][3] = avg_y
-    
-    # 步骤2：确保垂直桁架和斜向桁架的两个端点分别贴合在不同的水平桁架上
+
+    # Step 2: Ensure both endpoints of vertical and diagonal trusses snap to different horizontal trusses
     for v_idx, v_line in enumerate(v_truss_lines):
-        # 处理起点和终点
+        # Process start and end points
         for point_idx in [0, 1]:
             x, y = v_line[point_idx*2], v_line[point_idx*2+1]
-            
-            # 寻找最近的水平桁架
+
+            # Find the nearest horizontal truss
             min_distance = float('inf')
             nearest_point = None
             nearest_h_idx = -1
-            
+
             for h_idx, h_line in enumerate(h_truss_lines):
                 distance, closest_point = point_to_line_distance((x, y), h_line)
                 if distance < min_distance:
                     min_distance = distance
                     nearest_point = closest_point
                     nearest_h_idx = h_idx
-            
-            # 如果找到了足够近的水平桁架，将端点对齐到该桁架上
+
+            # If a sufficiently close horizontal truss is found, align the endpoint to it
             if min_distance < threshold and nearest_point:
-                # 更新垂直桁架端点
+                # Update vertical truss endpoint
                 v_truss_lines[v_idx][point_idx*2] = nearest_point[0]
                 v_truss_lines[v_idx][point_idx*2+1] = nearest_point[1]
-    
+
     for d_idx, d_line in enumerate(d_truss_lines):
-        # 处理起点和终点
+        # Process start and end points
         for point_idx in [0, 1]:
             x, y = d_line[point_idx*2], d_line[point_idx*2+1]
-            
-            # 寻找最近的水平桁架
+
+            # Find the nearest horizontal truss
             min_distance = float('inf')
             nearest_point = None
             nearest_h_idx = -1
-            
+
             for h_idx, h_line in enumerate(h_truss_lines):
                 distance, closest_point = point_to_line_distance((x, y), h_line)
                 if distance < min_distance:
                     min_distance = distance
                     nearest_point = closest_point
                     nearest_h_idx = h_idx
-            
-            # 如果找到了足够近的水平桁架，将端点对齐到该桁架上
+
+            # If a sufficiently close horizontal truss is found, align the endpoint to it
             if min_distance < threshold and nearest_point:
-                # 更新斜向桁架端点
+                # Update diagonal truss endpoint
                 d_truss_lines[d_idx][point_idx*2] = nearest_point[0]
                 d_truss_lines[d_idx][point_idx*2+1] = nearest_point[1]
-    
-    # 步骤3：确保水平桁架端点与最近的垂直/斜向桁架端点对齐
-    # 收集更新后的垂直和斜向桁架的所有端点
+
+    # Step 3: Ensure horizontal truss endpoints align with the nearest vertical/diagonal truss endpoints
+    # Goal: For each endpoint of a horizontal truss, if it's not sufficiently close (distance > threshold)
+    #       to any vertical or diagonal truss endpoint, move it to the position of the nearest one.
+
+    # Collect all updated endpoints of vertical and diagonal trusses
     updated_vd_points = []
     for line in v_truss_lines:
         updated_vd_points.append((line[0], line[1]))
@@ -482,36 +567,39 @@ def cluster_endpoints(lines, threshold=6):
         updated_vd_points.append((line[2], line[3]))
 
     if not updated_vd_points:
-        print("警告：在步骤3中没有找到垂直或斜向桁架端点，无法对齐水平桁架端点。")
+        print("Warning: No vertical or diagonal truss endpoints found in Step 3. Cannot align horizontal truss endpoints.")
     else:
-        # 检查并调整每个水平桁架端点
+        # Check and adjust each horizontal truss endpoint
         for h_idx, h_line in enumerate(h_truss_lines):
-            for point_idx in [0, 1]:  # 检查起点 (0) 和终点 (1)
+            for point_idx in [0, 1]:  # Check start point (0) and end point (1)
                 h_point_x, h_point_y = h_line[point_idx * 2], h_line[point_idx * 2 + 1]
                 current_h_point = (h_point_x, h_point_y)
 
-                # 查找距离当前水平桁架端点最近的垂直/斜向桁架端点
+                # Find the nearest vertical/diagonal truss endpoint to the current horizontal truss endpoint
                 min_distance_sq = float('inf')
                 nearest_vd_point = None
 
                 for vd_point in updated_vd_points:
-                    # 使用距离的平方进行比较，避免开方运算
+                    # Use the square of the distance for comparison to avoid square root calculation
                     distance_sq = (current_h_point[0] - vd_point[0])**2 + (current_h_point[1] - vd_point[1])**2
                     if distance_sq < min_distance_sq:
                         min_distance_sq = distance_sq
                         nearest_vd_point = vd_point
 
-                # 计算实际最小距离
+                # Calculate the actual minimum distance
                 min_distance = np.sqrt(min_distance_sq)
 
-                # 如果最小距离大于阈值，则认为该水平桁架端点需要对齐
+                # If the minimum distance is greater than the threshold, the horizontal truss endpoint needs alignment
                 if min_distance > threshold:
-                    # 将水平桁架端点移动到最近的垂直/斜向桁架端点的位置
+                    # Move the horizontal truss endpoint to the position of the nearest vertical/diagonal truss endpoint
+                    # (Ensure nearest_vd_point is not None, it can always be found if updated_vd_points is not empty)
                     if nearest_vd_point:
                         h_truss_lines[h_idx][point_idx * 2] = nearest_vd_point[0]
                         h_truss_lines[h_idx][point_idx * 2 + 1] = nearest_vd_point[1]
-    
-    # 步骤4：调整垂直桁架构件的斜率，使其与水平构件垂直，沿着中点进行旋转
+                        # Optional debug output:
+                        # print(f"Adjusted H-truss {h_idx} endpoint {point_idx} from ({h_point_x:.1f}, {h_point_y:.1f}) to ({nearest_vd_point[0]:.1f}, {nearest_vd_point[1]:.1f}), distance: {min_distance:.1f}")
+
+    # Step 4: Adjust the slope of vertical truss members to be perpendicular to horizontal members, rotating around the midpoint
     if h_truss_lines:
         # 计算水平桁架的平均斜率
         h_slopes = []
@@ -567,21 +655,21 @@ def cluster_endpoints(lines, threshold=6):
             # 更新垂直桁架的端点
             v_truss_lines[v_idx] = [new_x1, new_y1, new_x2, new_y2]
     
-    # 步骤5：将斜撑端点对齐到最近的更新后的垂直桁架端点
-    if v_truss_lines:  # 只有在存在垂直桁架时才执行
-        # 收集所有更新后的垂直桁架端点
+    # Step 5: Align diagonal brace endpoints to the nearest updated vertical truss endpoints
+    if v_truss_lines:  # Execute only if vertical trusses exist
+        # Collect all updated vertical truss endpoints
         updated_v_endpoints = []
         for v_line in v_truss_lines:
             updated_v_endpoints.append((v_line[0], v_line[1]))
             updated_v_endpoints.append((v_line[2], v_line[3]))
 
-        if updated_v_endpoints: # 确保有端点可以对齐
+        if updated_v_endpoints: # Ensure there are endpoints to align with
             for d_idx, d_line in enumerate(d_truss_lines):
-                for point_idx in [0, 1]: # 检查起点和终点
+                for point_idx in [0, 1]: # Check start and end points
                     d_point_x, d_point_y = d_line[point_idx * 2], d_line[point_idx * 2 + 1]
                     current_d_point = (d_point_x, d_point_y)
 
-                    # 查找距离当前斜撑端点最近的垂直桁架端点
+                    # Find the nearest vertical truss endpoint to the current diagonal brace endpoint
                     min_distance_sq = float('inf')
                     nearest_v_point = None
 
@@ -590,65 +678,69 @@ def cluster_endpoints(lines, threshold=6):
                         if distance_sq < min_distance_sq:
                             min_distance_sq = distance_sq
                             nearest_v_point = v_point
-                    
-                    # 计算实际最小距离
+
+                    # Calculate the actual minimum distance
                     min_distance = np.sqrt(min_distance_sq)
 
-                    # 如果最近的垂直桁架端点足够近，则将斜撑端点移动到该位置
+                    # If the nearest vertical truss endpoint is close enough, move the diagonal brace endpoint to its position
                     if min_distance < threshold and nearest_v_point:
                         d_truss_lines[d_idx][point_idx * 2] = nearest_v_point[0]
                         d_truss_lines[d_idx][point_idx * 2 + 1] = nearest_v_point[1]
+                        # Optional debug output
+                        # print(f"Adjusted D-brace {d_idx} endpoint {point_idx} to V-endpoint ({nearest_v_point[0]:.1f}, {nearest_v_point[1]:.1f})")
 
-    # 步骤6：更新水平构件两端的顶点，使其与更新后的垂直桁架端点对齐
-    if v_truss_lines:  # 只有在存在垂直桁架时才执行
-        # 使用更新后的垂直桁架端点（在步骤5中已收集）
-        if not 'updated_v_endpoints' in locals():
-            updated_v_endpoints = []
-            for v_line in v_truss_lines:
-                updated_v_endpoints.append((v_line[0], v_line[1]))
-                updated_v_endpoints.append((v_line[2], v_line[3]))
-        
-        # 也收集更新后的斜撑端点
+    # Step 6: Update the endpoints of horizontal members to align with the updated vertical/diagonal truss endpoints
+    if v_truss_lines or d_truss_lines: # Execute only if vertical or diagonal trusses exist
+        # Collect updated endpoints from vertical trusses (already done in Step 5 if v_truss_lines exist)
+        if 'updated_v_endpoints' not in locals():
+             updated_v_endpoints = []
+             for v_line in v_truss_lines:
+                 updated_v_endpoints.append((v_line[0], v_line[1]))
+                 updated_v_endpoints.append((v_line[2], v_line[3]))
+
+        # Collect updated diagonal brace endpoints
         updated_d_endpoints = []
         for d_line in d_truss_lines:
             updated_d_endpoints.append((d_line[0], d_line[1]))
             updated_d_endpoints.append((d_line[2], d_line[3]))
-        
-        # 合并所有可能的连接点
+
+        # Merge all possible connection points
         all_connection_points = updated_v_endpoints + updated_d_endpoints
-        
-        if all_connection_points:  # 确保有端点可以对齐
+
+        if all_connection_points:  # Ensure there are endpoints to align with
             for h_idx, h_line in enumerate(h_truss_lines):
-                for point_idx in [0, 1]:  # 检查水平构件的起点和终点
+                for point_idx in [0, 1]:  # Check the start and end points of the horizontal member
                     h_point_x, h_point_y = h_line[point_idx * 2], h_line[point_idx * 2 + 1]
                     current_h_point = (h_point_x, h_point_y)
-                    
-                    # 查找距离当前水平桁架端点最近的连接点（垂直或斜撑端点）
+
+                    # Find the nearest connection point (vertical or diagonal endpoint) to the current horizontal truss endpoint
                     min_distance_sq = float('inf')
                     nearest_connection_point = None
-                    
+
                     for connection_point in all_connection_points:
                         distance_sq = (current_h_point[0] - connection_point[0])**2 + (current_h_point[1] - connection_point[1])**2
                         if distance_sq < min_distance_sq:
                             min_distance_sq = distance_sq
                             nearest_connection_point = connection_point
-                    
-                    # 计算实际最小距离
+
+                    # Calculate the actual minimum distance
                     min_distance = np.sqrt(min_distance_sq)
-                    
-                    # 如果最近的连接点足够近，则将水平桁架端点移动到该位置
+
+                    # If the nearest connection point is close enough, move the horizontal truss endpoint to its position
                     if min_distance < threshold and nearest_connection_point:
                         h_truss_lines[h_idx][point_idx * 2] = nearest_connection_point[0]
                         h_truss_lines[h_idx][point_idx * 2 + 1] = nearest_connection_point[1]
+                        # Optional debug output
+                        # print(f"Adjusted H-truss {h_idx} endpoint {point_idx} to connection point ({nearest_connection_point[0]:.1f}, {nearest_connection_point[1]:.1f})")
 
-    # 构建更新后的线段字典
+    # Build the updated line segment dictionary
     updated_lines = {
         "H-truss": h_truss_lines,
         "V_truss": v_truss_lines,
         "D_truss": d_truss_lines
     }
-    
-    return updated_lines 
+
+    return updated_lines
 
 def normalize_truss_size(lines):
     """
@@ -827,78 +919,48 @@ def normalize_truss_size(lines):
     updated_lines = {
         "H-truss": new_h_truss,
         "V_truss": new_v_truss,
-        "D_truss": new_d_truss,
-        # 额外信息，可以用于调试或其他用途
-        "point_dict": normalized_point_dict,
-        "lines_dict": lines_dict,
-        "h_types": h_types,
-        "v_types": v_types,
-        "d_types": d_types,
-        "x_map": x_map,  # 添加x坐标映射，方便调试
-        "y_map": binary_y_map  # 添加y坐标映射，方便调试
+        "D_truss": new_d_truss
     }
     
     return updated_lines
 
-def better_cluster_endpoints(lines, threshold=6):
-    """
-    改进的端点聚类算法
-    
-    Args:
-        lines: 线段列表，每个线段是一个包含四个元素的列表 [x1, y1, x2, y2]
-        threshold: 端点聚类阈值
-        
-    Returns:
-        updated_lines: 聚类后的线段列表
-    """
-    # 提取所有线段的端点
-    all_endpoints = []
-    for line in lines:
-        all_endpoints.append((line[0], line[1]))
-        all_endpoints.append((line[2], line[3]))
-    
-    # 对端点进行排序，先按照x坐标排序，再按照y坐标排序
-    all_endpoints.sort(key=lambda x: (x[0], x[1]))
-    
-    # 聚类端点，将距离小于阈值的点合并为一个点
-    clustered_points = []
-    coords_map = {}  # 建立原始坐标到聚类后坐标的映射
-    
-    for point in all_endpoints:
-        # 检查当前点是否可以归入已有的聚类
-        found_cluster = False
-        for cluster_point in clustered_points:
-            # 计算当前点与聚类点的距离
-            dist = np.sqrt((point[0] - cluster_point[0])**2 + (point[1] - cluster_point[1])**2)
-            if dist < threshold:
-                # 将当前点映射到聚类点
-                coords_map[point] = cluster_point
-                found_cluster = True
-                break
-        
-        # 如果找不到合适的聚类，创建一个新的聚类
-        if not found_cluster:
-            clustered_points.append(point)
-            coords_map[point] = point
-    
-    # 使用坐标映射更新线段坐标
-    updated_lines = []
-    
-    for line in lines:
-        # 获取端点坐标
-        start_point = (line[0], line[1])
-        end_point = (line[2], line[3])
-        
-        # 获取聚类后的坐标
-        clustered_start = coords_map[start_point]
-        clustered_end = coords_map[end_point]
-        
-        # 创建更新后的线段
-        updated_line = [
-            clustered_start[0], clustered_start[1],
-            clustered_end[0], clustered_end[1]
-        ]
-        
-        updated_lines.append(updated_line)
-    
-    return updated_lines
+# Merge after detecting line segments
+if lines is not None:
+    # Fix: Convert lines to a standard Python list
+    lines = [line[0] for line in lines]
+    print(f"Original line segments: {len(lines)}")
+
+    # Improved line segment merging logic
+    lines = merge_lines(lines, angle_threshold=17, parallel_distance_threshold=40)
+    print(f"Merged line segments: {len(lines)}")
+
+    # Identify horizontal trusses
+    truss_result = classify_H_truss_members(lines, threshold=25)
+    h_truss_lines = truss_result["H-truss"]
+    other_lines = truss_result["Other"]
+    print(f"Identified horizontal trusses: {len(h_truss_lines)}")
+    print(f"Other segments: {len(other_lines)}")
+
+# Further classify vertical trusses and diagonal braces
+all_truss_result = classify_V_truss_members(truss_result, angle_threshold=20)
+h_truss_lines = all_truss_result["H-truss"]
+v_truss_lines = all_truss_result["V_truss"]
+d_truss_lines = all_truss_result["D_truss"]
+
+print(f"Horizontal trusses: {len(h_truss_lines)}")
+print(f"Vertical trusses: {len(v_truss_lines)}")
+print(f"Diagonal braces: {len(d_truss_lines)}")
+
+# Perform endpoint clustering
+clustered_truss_result = cluster_endpoints(all_truss_result, threshold=50)
+
+# Normalize truss size
+normalized_truss_result = normalize_truss_size(clustered_truss_result)
+
+h_clustered_lines = normalized_truss_result["H-truss"]
+v_clustered_lines = normalized_truss_result["V_truss"]
+d_clustered_lines = normalized_truss_result["D_truss"]
+
+print(h_clustered_lines)
+print(v_clustered_lines)
+print(d_clustered_lines)
