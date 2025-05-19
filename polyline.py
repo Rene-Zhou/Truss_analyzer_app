@@ -43,7 +43,7 @@ def process_image(image_path, threshold=40, min_line_length=40, max_line_gap=30,
         detected_lines.append([x1, y1, x2, y2])
     
     # 合并线段
-    merged_lines = merge_lines(detected_lines, angle_threshold=15, parallel_distance_threshold=40)
+    merged_lines = merge_lines(detected_lines, angle_threshold=3, parallel_distance_threshold=40)
     
     # 端点聚类
     clustered_lines = better_cluster_endpoints(merged_lines, threshold=30)
@@ -58,4 +58,4 @@ def process_image(image_path, threshold=40, min_line_length=40, max_line_gap=30,
 
 if __name__ == "__main__":
 
-    process_image("test_img/test4.png")
+    process_image("test_img/test5.png")
