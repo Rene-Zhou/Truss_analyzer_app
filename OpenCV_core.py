@@ -4,7 +4,6 @@ import os
 from datetime import datetime
 import tempfile
 
-# 从OpenCV_B_0423_1.py复制的函数
 def merge_lines(lines, angle_threshold=10, parallel_distance_threshold=30):
     """
     线段合并函数，可以处理重叠/部分重叠的线段，即斜率相近、线段间最近距离接近、线段端点相差较远的线段。

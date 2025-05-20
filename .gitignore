@@ -33,3 +33,4 @@ build/
 # test data
 test_img/
 test_result/
+test/
