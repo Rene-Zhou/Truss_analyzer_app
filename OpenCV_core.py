@@ -901,3 +901,160 @@ def better_cluster_endpoints(lines, threshold=6):
         updated_lines.append(updated_line)
     
     return updated_lines
+
+def snap_endpoints_to_lines(lines, threshold=5):
+    """
+    将端点吸附到附近的线段上
+    
+    Args:
+        lines: 线段列表，每个线段是一个包含四个元素的列表 [x1, y1, x2, y2]
+        threshold: 吸附阈值，点到线段距离小于此值时会被吸附
+        
+    Returns:
+        updated_lines: 吸附后的线段列表
+    """
+    if not lines or len(lines) < 2:
+        return lines
+    
+    # 计算点到线段的垂直距离及投影点
+    def point_to_line_distance(point, line):
+        """计算点到线段的最短距离及投影点坐标"""
+        x0, y0 = point
+        x1, y1, x2, y2 = line
+        
+        # 如果线段长度为0，则直接返回到端点的距离
+        if abs(x2-x1) < 1e-8 and abs(y2-y1) < 1e-8:
+            return np.sqrt((x0-x1)**2 + (y0-y1)**2), (x1, y1)
+        
+        # 线段的方向向量
+        dx, dy = x2-x1, y2-y1
+        # 线段长度的平方
+        length_squared = dx**2 + dy**2
+        
+        # 计算投影比例 t
+        t = max(0, min(1, ((x0-x1)*dx + (y0-y1)*dy) / length_squared))
+        
+        # 计算线段上的最近点
+        closest_x = x1 + t * dx
+        closest_y = y1 + t * dy
+        
+        # 计算距离
+        distance = np.sqrt((x0-closest_x)**2 + (y0-closest_y)**2)
+        
+        return distance, (closest_x, closest_y)
+    
+    # 查找最匹配的端点键，处理浮点数近似比较问题
+    def find_matching_endpoint(point, endpoint_dict, tolerance=1e-8):
+        x, y = point
+        # 直接尝试精确匹配
+        if point in endpoint_dict:
+            return point
+        
+        # 遍历所有端点，寻找最近的匹配
+        for endpoint in endpoint_dict.keys():
+            ex, ey = endpoint
+            if abs(ex - x) < tolerance and abs(ey - y) < tolerance:
+                return endpoint
+        
+        # 如果没找到匹配点，则返回None
+        return None
+    
+    # 复制一份线段列表，以便进行修改
+    updated_lines = [line.copy() for line in lines]
+    
+    # 创建端点到线段索引的映射，用于快速查找使用特定端点的所有线段
+    endpoint_to_lines = {}
+    
+    for i, line in enumerate(updated_lines):
+        start_point = (line[0], line[1])
+        end_point = (line[2], line[3])
+        
+        if start_point not in endpoint_to_lines:
+            endpoint_to_lines[start_point] = []
+        endpoint_to_lines[start_point].append((i, 'start'))
+        
+        if end_point not in endpoint_to_lines:
+            endpoint_to_lines[end_point] = []
+        endpoint_to_lines[end_point].append((i, 'end'))
+    
+    # 对每个端点进行吸附处理
+    processed_points = set()  # 用于记录已处理过的点，避免重复处理
+    
+    for i, line in enumerate(updated_lines):
+        # 处理起点
+        start_point = (line[0], line[1])
+        if start_point not in processed_points:
+            min_distance = float('inf')
+            best_projection = None
+            best_line_idx = -1
+            
+            # 检查此端点是否靠近其他不相连的线段
+            for j, other_line in enumerate(updated_lines):
+                # 跳过当前线段和共享此端点的线段
+                if i == j or (other_line[0], other_line[1]) == start_point or (other_line[2], other_line[3]) == start_point:
+                    continue
+                
+                # 计算点到线段的距离及投影点
+                distance, projection = point_to_line_distance(start_point, other_line)
+                
+                if distance < min_distance and distance < threshold:
+                    min_distance = distance
+                    best_projection = projection
+                    best_line_idx = j
+            
+            # 如果找到了足够近的线段，则进行吸附
+            if best_projection:
+                # 查找匹配的端点键
+                matching_start_point = find_matching_endpoint(start_point, endpoint_to_lines)
+                
+                if matching_start_point:
+                    # 更新所有使用此端点的线段
+                    for line_idx, point_type in endpoint_to_lines[matching_start_point]:
+                        if point_type == 'start':
+                            updated_lines[line_idx][0] = best_projection[0]
+                            updated_lines[line_idx][1] = best_projection[1]
+                        else:  # 'end'
+                            updated_lines[line_idx][2] = best_projection[0]
+                            updated_lines[line_idx][3] = best_projection[1]
+                    
+                    processed_points.add(start_point)
+        
+        # 处理终点
+        end_point = (line[2], line[3])
+        if end_point not in processed_points:
+            min_distance = float('inf')
+            best_projection = None
+            best_line_idx = -1
+            
+            # 检查此端点是否靠近其他不相连的线段
+            for j, other_line in enumerate(updated_lines):
+                # 跳过当前线段和共享此端点的线段
+                if i == j or (other_line[0], other_line[1]) == end_point or (other_line[2], other_line[3]) == end_point:
+                    continue
+                
+                # 计算点到线段的距离及投影点
+                distance, projection = point_to_line_distance(end_point, other_line)
+                
+                if distance < min_distance and distance < threshold:
+                    min_distance = distance
+                    best_projection = projection
+                    best_line_idx = j
+            
+            # 如果找到了足够近的线段，则进行吸附
+            if best_projection:
+                # 查找匹配的端点键
+                matching_end_point = find_matching_endpoint(end_point, endpoint_to_lines)
+                
+                if matching_end_point:
+                    # 更新所有使用此端点的线段
+                    for line_idx, point_type in endpoint_to_lines[matching_end_point]:
+                        if point_type == 'start':
+                            updated_lines[line_idx][0] = best_projection[0]
+                            updated_lines[line_idx][1] = best_projection[1]
+                        else:  # 'end'
+                            updated_lines[line_idx][2] = best_projection[0]
+                            updated_lines[line_idx][3] = best_projection[1]
+                    
+                    processed_points.add(end_point)
+    
+    return updated_lines

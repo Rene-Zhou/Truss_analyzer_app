@@ -125,7 +125,7 @@ def find_h_truss_members(lines):
     """
     h_list = []
     endpoint_tolerance = 5  # 端点匹配的容差，单位是像素
-    angle_tolerance = 15    # 角度容差，单位是度
+    angle_tolerance = 30    # 角度容差，单位是度
     
     for i in range(len(lines)):
         pt1_i, pt2_i = lines[i]
@@ -205,7 +205,7 @@ def find_h_truss_members(lines):
 
 def group_h_truss_members(h_lines):
     """
-    对水平桁架构件进行分组 - 优化版
+    对水平桁架构件进行分组
     
     Args:
         h_lines: 水平桁架线段列表
@@ -306,6 +306,121 @@ def group_h_truss_members(h_lines):
     
     return named_groups
 
+def move_truss(lines, h_truss_groups):
+    """
+    移动整个桁架结构，使最左下角点位于原点，并将y坐标转换为笛卡尔坐标系（从下到上增加）
+    
+    Args:
+        lines: 所有线段的列表
+        h_truss_groups: 水平桁架分组字典
+        
+    Returns:
+        tuple: (移动后的所有线段列表, 移动后的水平桁架分组字典)
+    """
+    # 如果没有线段，直接返回
+    if not lines:
+        return lines, h_truss_groups
+    
+    # 收集所有点的坐标
+    all_points = []
+    for line in lines:
+        pt1, pt2 = line
+        all_points.append(pt1)
+        all_points.append(pt2)
+    
+    # 寻找最左下角的点 (最小x, 最大y)
+    min_x = min(point[0] for point in all_points)
+    max_y = max(point[1] for point in all_points)
+    min_y = min(point[1] for point in all_points)
+    
+    # 移动所有线段，同时将y坐标转换为笛卡尔坐标系（从下到上增加）
+    moved_lines = []
+    for line in lines:
+        (x1, y1), (x2, y2) = line
+        # 减去min_x来移动x坐标，转换y坐标（坐标系翻转）
+        # 将y坐标范围从[min_y, max_y]映射到[0, max_y-min_y]
+        new_pt1 = (x1 - min_x, max_y - y1)
+        new_pt2 = (x2 - min_x, max_y - y2)
+        moved_lines.append((new_pt1, new_pt2))
+    
+    # 移动分组中的水平桁架线段
+    moved_h_truss_groups = {
+        'h_truss_top': [],
+        'h_truss_bottom': []
+    }
+    
+    for group_name, group_lines in h_truss_groups.items():
+        for line in group_lines:
+            (x1, y1), (x2, y2) = line
+            # 减去min_x来移动x坐标，转换y坐标（坐标系翻转）
+            new_pt1 = (x1 - min_x, max_y - y1)
+            new_pt2 = (x2 - min_x, max_y - y2)
+            moved_h_truss_groups[group_name].append((new_pt1, new_pt2))
+    
+    return moved_lines, moved_h_truss_groups
+
+def scale_truss(lines, h_truss_groups):
+    """
+    缩放桁架结构，基于h_truss_bottom的尺寸
+    
+    Args:
+        lines: 所有线段的列表
+        h_truss_groups: 水平桁架分组字典
+        
+    Returns:
+        tuple: (缩放后的所有线段列表, 缩放后的水平桁架分组字典)
+    """
+    # 如果没有底部水平桁架或线段，直接返回
+    if not h_truss_groups['h_truss_bottom'] or not lines:
+        return lines, h_truss_groups
+    
+    # 收集底部水平桁架的所有点
+    bottom_points = []
+    for line in h_truss_groups['h_truss_bottom']:
+        pt1, pt2 = line
+        bottom_points.append(pt1)
+        bottom_points.append(pt2)
+    
+    # 计算底部水平桁架的x和y的最大最小值
+    min_x = min(point[0] for point in bottom_points)
+    max_x = max(point[0] for point in bottom_points)
+    min_y = min(point[1] for point in bottom_points)
+    max_y = max(point[1] for point in bottom_points)
+    
+    # 计算缩放因子
+    x_scale_factor = (max_x - min_x) / 2.5 if max_x != min_x else 1
+    y_scale_factor = (max_y - min_y) / 0.575 if max_y != min_y else 1
+    
+    if x_scale_factor == 0:
+        x_scale_factor = 1
+    if y_scale_factor == 0:
+        y_scale_factor = 1
+    
+    # 缩放所有线段
+    scaled_lines = []
+    for line in lines:
+        (x1, y1), (x2, y2) = line
+        # 缩放x和y坐标，保留为浮点数
+        new_pt1 = (x1 / x_scale_factor, y1 / y_scale_factor)
+        new_pt2 = (x2 / x_scale_factor, y2 / y_scale_factor)
+        scaled_lines.append((new_pt1, new_pt2))
+    
+    # 缩放分组中的水平桁架线段
+    scaled_h_truss_groups = {
+        'h_truss_top': [],
+        'h_truss_bottom': []
+    }
+    
+    for group_name, group_lines in h_truss_groups.items():
+        for line in group_lines:
+            (x1, y1), (x2, y2) = line
+            # 缩放x和y坐标，保留为浮点数
+            new_pt1 = (x1 / x_scale_factor, y1 / y_scale_factor)
+            new_pt2 = (x2 / x_scale_factor, y2 / y_scale_factor)
+            scaled_h_truss_groups[group_name].append((new_pt1, new_pt2))
+    
+    return scaled_lines, scaled_h_truss_groups
+
 def main():
     # 读取并转换图像
     img, gray = load_and_convert_image('test_img/test4.png')
@@ -339,6 +454,12 @@ def main():
     # 对水平桁架构件进行分组
     grouped_h_truss = group_h_truss_members(h_truss_members)
     
+    # 移动桁架，使最左下角点位于原点
+    lines, grouped_h_truss = move_truss(lines, grouped_h_truss)
+    
+    # 缩放桁架
+    lines, grouped_h_truss = scale_truss(lines, grouped_h_truss)
+    
     # 创建一个白色背景的图像用于绘制线段
     img_with_lines = np.ones_like(img) * 255
     
@@ -346,7 +467,10 @@ def main():
     for line in lines:
         if line not in h_truss_members:
             pt1, pt2 = line
-            cv2.line(img_with_lines, pt1, pt2, (0, 0, 0), 3)
+            # 转换为整数用于绘图
+            pt1_int = (int(pt1[0]), int(pt1[1]))
+            pt2_int = (int(pt2[0]), int(pt2[1]))
+            cv2.line(img_with_lines, pt1_int, pt2_int, (0, 0, 0), 3)
     
     # 定义不同组的颜色
     truss_colors = {
@@ -359,7 +483,10 @@ def main():
         color = truss_colors[group_name]
         for line in group:
             pt1, pt2 = line
-            cv2.line(img_with_lines, pt1, pt2, color, 3)
+            # 转换为整数用于绘图
+            pt1_int = (int(pt1[0]), int(pt1[1]))
+            pt2_int = (int(pt2[0]), int(pt2[1]))
+            cv2.line(img_with_lines, pt1_int, pt2_int, color, 3)
     
     # BGR转RGB用于matplotlib显示
     img_with_corners_rgb = cv2.cvtColor(img_with_corners, cv2.COLOR_BGR2RGB)
@@ -374,7 +501,43 @@ def main():
     plt.axis('off')
     
     plt.subplot(1, 2, 2)
-    plt.imshow(img_with_lines_rgb)
+    # 创建一个空白画布，而不是显示图像
+    ax = plt.gca()
+    ax.set_facecolor('white')
+    
+    # 计算所有线段中的最大x和y值，用于动态设置坐标轴范围
+    all_points = []
+    for line in lines:
+        pt1, pt2 = line
+        all_points.append(pt1)
+        all_points.append(pt2)
+    
+    max_x = max(point[0] for point in all_points) if all_points else 1000
+    max_y = max(point[1] for point in all_points) if all_points else 1000
+    
+    # 添加10%的边距，使图形不会紧贴边缘
+    margin = 0.1
+    max_x_with_margin = max_x * (1 + margin)
+    max_y_with_margin = max_y * (1 + margin)
+    
+    # 直接在matplotlib上绘制非水平桁架构件（黑色）
+    for line in lines:
+        if line not in h_truss_members:
+            (x1, y1), (x2, y2) = line
+            plt.plot([x1, x2], [y1, y2], 'k-', linewidth=2)
+    
+    # matplotlib中的颜色映射
+    plt_truss_colors = {
+        'h_truss_top': 'b',     # 蓝色
+        'h_truss_bottom': 'g'   # 绿色
+    }
+    
+    # 在matplotlib上绘制不同组的水平桁架构件
+    for group_name, group in grouped_h_truss.items():
+        color = plt_truss_colors[group_name]
+        for line in group:
+            (x1, y1), (x2, y2) = line
+            plt.plot([x1, x2], [y1, y2], color=color, linewidth=2)
     
     # 更新图例文本，使用组名称
     color_legend = "Black: Non-horizontal members"
@@ -384,9 +547,10 @@ def main():
         color_legend += ", Green: Bottom Horizontal Truss"
     
     plt.title(f'Reconstructed truss\n{color_legend}')
-    # 设置坐标轴范围为1000x1000
-    plt.xlim(0, 1000)
-    plt.ylim(1000, 0)  # y轴反转以匹配图像坐标系
+    
+    # 设置坐标轴范围，使原点位于左下角
+    plt.xlim(0, 3)
+    plt.ylim(0, 3)  # 正常笛卡尔坐标系，y轴向上为正
     plt.grid(True)
     
     plt.tight_layout()
